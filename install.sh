@@ -69,6 +69,12 @@ else
 fi
 
 # ── 3. 配置 ────────────────────────────────────────────────────────
+# 先迁移再建目录，顺序反了的话新目录会被凭空建出来，迁移条件永远不成立，
+# 老目录里的配置和累积状态就被晾在那儿了（升级一次丢一次）。
+OLD_DATA_DIR="$CLAUDE_DIR/session-init"
+if [ ! -d "$DATA_DIR" ] && [ -d "$OLD_DATA_DIR" ]; then
+  mv "$OLD_DATA_DIR" "$DATA_DIR" && echo "已把旧的 session-init 数据目录迁到 $DATA_DIR"
+fi
 mkdir -p "$DATA_DIR/state" "$DATA_DIR/reports"
 if [ -f "$DATA_DIR/config.json" ]; then
   echo "配置已存在，没覆盖：$DATA_DIR/config.json"
