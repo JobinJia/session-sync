@@ -78,4 +78,5 @@ fi
 echo
 echo "装好了。新开一个会话，钩子就会在启动时同步你当前所在的仓库。"
 echo "手动触发：/session-sync   看谁回了你：/repo-inbox"
-[ -z "$(command -v gh)" ] && echo "提醒：/repo-inbox 需要 gh CLI 并且登录过（gh auth login）"
+command -v gh >/dev/null 2>&1 || echo "提醒：/repo-inbox 需要 gh CLI 并且登录过（gh auth login）"
+exit 0
