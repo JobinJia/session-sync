@@ -29,7 +29,7 @@ if [ "$UNINSTALL" = "1" ]; then
                                         | map(select((.hooks | length) > 0)))' "$SETTINGS" > "$SETTINGS.tmp" \
       && mv "$SETTINGS.tmp" "$SETTINGS" && echo "已从 settings.json 摘掉钩子（旧文件已备份）"
   fi
-  echo "配置和状态留在 $DATA_DIR，没有动。确定不要了自己删。"
+  echo "配置和状态留在 ${DATA_DIR}，没有动。确定不要了自己删。"
   exit 0
 fi
 
@@ -50,7 +50,8 @@ chmod +x "$REPO"/skills/*/scripts/*.sh 2>/dev/null
 
 # ── 2. 钩子 ────────────────────────────────────────────────────────
 mkdir -p "$CLAUDE_DIR"
-[ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
+SETTINGS_EXISTED=1
+[ -f "$SETTINGS" ] || { echo '{}' > "$SETTINGS"; SETTINGS_EXISTED=0; }
 if ! jq -e . "$SETTINGS" >/dev/null 2>&1; then
   echo "！$SETTINGS 不是合法 JSON，没敢动。修好再跑一次。"; exit 1
 fi
@@ -59,7 +60,8 @@ if jq -e --arg c "$HOOK_CMD" '[.hooks.SessionStart[]?.hooks[]?.command] | index(
 elif jq -e '[.hooks.SessionStart[]?.hooks[]?.command] | map(select(test("sync\\.sh --hook"))) | length > 0' "$SETTINGS" >/dev/null 2>&1; then
   echo "！已有一条指向别处的 sync.sh 钩子，没动它。确认后手工改成：$HOOK_CMD"
 else
-  cp "$SETTINGS" "$SETTINGS.bak-$(date +%Y%m%d-%H%M%S)"
+  # 全新机器上 settings.json 是我们刚建的空壳，没必要给它留备份
+  [ "$SETTINGS_EXISTED" = "1" ] && cp "$SETTINGS" "$SETTINGS.bak-$(date +%Y%m%d-%H%M%S)"
   jq --arg c "$HOOK_CMD" '.hooks //= {} | .hooks.SessionStart //= []
      | .hooks.SessionStart += [{matcher:"", hooks:[{type:"command", command:$c, timeout:60}]}]' \
      "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS" \
