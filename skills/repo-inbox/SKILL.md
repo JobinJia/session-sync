@@ -13,8 +13,8 @@ allowed-tools: Bash, Read
 当前目录不是 git 仓库时（比如多仓工作区的根目录），退回查整个组织，并在输出的 `scopeReason` 里说明。
 
 脚本：`~/.claude/skills/repo-inbox/scripts/inbox.sh`（输出 JSON）
-配置：`~/.claude/session-init/config.json` 的 `inbox` 段
-已读状态：`~/.claude/session-init/state/inbox-seen.json`
+配置：`~/.claude/branch-sync/config.json` 的 `inbox` 段
+已读状态：`~/.claude/branch-sync/state/inbox-seen.json`
 
 ## 怎么用
 
@@ -35,7 +35,7 @@ allowed-tools: Bash, Read
 1. **🔴 需要我回应的**——`review:CHANGES_REQUESTED`、评审里提了具体问题、`review-comment`（代码行内评论，`ctx` 字段是 `文件:行号`）。
    把评论**原文**给用户看（这是他要的「把内容拉下来」），并说清对方在质疑什么、涉及哪个文件哪一行。
 2. **🟡 有新回复但只是讨论**——普通 comment、`review:APPROVED`、discussion 的回复。摘要 + 原文。
-3. **🔧 长期合不上主分支的仓**——输出里的 `blockedRepos`。这是 session-sync 记下来的：某个仓的开发分支合不进主分支，卡了 `stuckDays` 天。
+3. **🔧 长期合不上主分支的仓**——输出里的 `blockedRepos`。这是 branch-sync 记下来的：某个仓的开发分支合不进主分支，卡了 `stuckDays` 天。
    卡 7 天以上的要单独点出来，说清是哪个仓、哪个分支、卡在哪几个文件（`files`）、什么原因（`kind`：`merge-conflict` 是真冲突，`dirty-overlap` 是没提交的改动挡着）。
    `kind` 是 `dirty-overlap` 的话，出路很简单：把手上改动提交或 stash 掉就能合，值得当场提醒。
 4. **⚙️ CI 挂了的 open PR**——`ci` 字段是 `FAILURE`/`ERROR` 的。只报还开着的 PR，已合并/已关闭的红灯是噪音。

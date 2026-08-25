@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT:-${extensionPath:-.}}/skills/session-sync/scripts/sync.sh\" --hook",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT:-${extensionPath:-.}}/skills/branch-sync/scripts/sync.sh\" --hook",
             "timeout": 60
           }
         ]

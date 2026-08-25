@@ -3,9 +3,13 @@
 # 一次 GraphQL 拉全，按上次查看时间做增量，输出 JSON 交给 Claude 翻译成人话。
 set -uo pipefail
 
-# SESSION_INIT_DIR 可以把配置/状态/报告整体挪走 —— 测试时用它做隔离，
+# BRANCH_SYNC_DIR 可以把配置/状态/报告整体挪走 —— 测试时用它做隔离，
 # 免得把真实配置和状态搅进来。日常不用设。
-CONFIG_DIR="${SESSION_INIT_DIR:-$HOME/.claude/session-init}"
+CONFIG_DIR="${BRANCH_SYNC_DIR:-$HOME/.claude/branch-sync}"
+# 见 sync.sh 里的同名说明：老的 session-init 目录整体搬过来，别丢累积状态
+if [ ! -d "$CONFIG_DIR" ] && [ -d "$HOME/.claude/session-init" ] && [ -z "${BRANCH_SYNC_DIR:-}" ]; then
+  mv "$HOME/.claude/session-init" "$CONFIG_DIR" 2>/dev/null
+fi
 CONFIG_FILE="$CONFIG_DIR/config.json"
 SEEN_FILE="$CONFIG_DIR/state/inbox-seen.json"
 mkdir -p "$CONFIG_DIR/state"
@@ -22,8 +26,10 @@ while [ $# -gt 0 ]; do
     --all)     SHOW_ALL=1; MARK=0 ;;
     --no-mark) MARK=0 ;;
     --org)     FORCE_ORG=1 ;;
-    --repo)    shift; REPO_FILTER="${1:-}" ;;
-    --cwd)     shift; CWD_OVERRIDE="${1:-}" ;;
+    --repo)    shift; REPO_FILTER="${1:-}"
+               [ -n "$REPO_FILTER" ] || { echo '{"error":"--repo 后面要跟仓库名"}'; exit 0; } ;;
+    --cwd)     shift; CWD_OVERRIDE="${1:-}"
+               [ -n "$CWD_OVERRIDE" ] || { echo '{"error":"--cwd 后面要跟目录"}'; exit 0; } ;;
     *)         ;;
   esac
   shift
@@ -33,22 +39,30 @@ command -v gh >/dev/null 2>&1 || { echo '{"error":"gh 未安装"}'; exit 0; }
 gh auth status >/dev/null 2>&1 || { echo '{"error":"gh 未登录，先跑 gh auth login"}'; exit 0; }
 
 cfg() { jq -r "$1 // empty" "$CONFIG_FILE" 2>/dev/null; }
-# 只用于「已关闭/已合并」那一组：开着的东西不受时间限制
+# 只用于「已关闭/已合并」那一组：开着的东西不受时间限制。
+# 必须校验是不是数字：非数字会让 date 报错、SINCE 变成空串，查询条件跟着畸形，
+# 而且是安静地畸形 —— 你会以为"没人回你"，其实是查询压根没查对。
 LOOKBACK=$(cfg '.inbox.closedLookbackDays')
 [ -n "$LOOKBACK" ] || LOOKBACK=$(cfg '.inbox.lookbackDays')
-[ -n "$LOOKBACK" ] || LOOKBACK=30
+case "$LOOKBACK" in ''|*[!0-9]*) LOOKBACK=30 ;; esac
 # 同样不能用 `// true`：jq 会把 false 当缺省，导致 includeCI:false 关不掉
 INCLUDE_CI=$(jq -r 'if (.inbox.includeCI) == false then "false" else "true" end' "$CONFIG_FILE" 2>/dev/null)
 
 # 当前所在仓库 → owner/name。支持 https 和 git@ 两种 remote 写法。
+# 只认 github.com 的 remote。不加这道判断的话，gitlab 或本地路径的 remote 会被原样
+# 塞进 `repo:<...>` 查询里，查出一片空白 —— 而"什么都没查到"和"没人回你"长得一模一样。
 detect_repo() {
-  local dir url
+  local dir url norm
   dir="${CWD_OVERRIDE:-$PWD}"
   url=$(git -C "$dir" remote get-url origin 2>/dev/null) || return 1
-  printf '%s' "$url" \
+  norm=$(printf '%s' "$url" \
     | sed -E 's#^git@github\.com:#https://github.com/#' \
-    | sed -E 's#^ssh://git@github\.com/#https://github.com/#' \
-    | sed -E 's#^https://[^/]*github\.com/##; s#\.git$##; s#/+$##'
+    | sed -E 's#^ssh://git@github\.com/#https://github.com/#')
+  case "$norm" in
+    https://github.com/*|https://www.github.com/*) ;;
+    *) return 1 ;;
+  esac
+  printf '%s' "$norm" | sed -E 's#^https://(www\.)?github\.com/##; s#\.git$##; s#/+$##'
 }
 
 # 组织名只有两个用途：`--org` 的范围、`--repo <短名>` 补全 owner。
@@ -84,7 +98,15 @@ else
     SCOPE_LABEL="$DETECTED"; SCOPE_Q="repo:$DETECTED"; SCOPE_SRC="当前所在仓库"
   else
     SCOPE_KIND="org"; SCOPE_LABEL="$ORG"; SCOPE_Q="org:$ORG"
-    SCOPE_SRC="当前目录不是 git 仓库，退回整个组织"
+    if git -C "${CWD_OVERRIDE:-$PWD}" rev-parse --show-toplevel >/dev/null 2>&1; then
+      SCOPE_SRC="当前仓库的 origin 不是 GitHub，退回整个组织"
+    else
+      SCOPE_SRC="当前目录不是 git 仓库，退回整个组织"
+    fi
+    if [ -z "$ORG" ]; then
+      echo '{"error":"这个工具只查 GitHub。当前目录推不出 GitHub 仓库，配置里也没设 inbox.org"}'
+      exit 0
+    fi
   fi
 fi
 SCOPE="$SCOPE_Q"
@@ -257,7 +279,7 @@ RESULT=$(printf '%s' "$RAW" | jq \
 ')
 
 # ── 长期卡住的仓也一起报 ──────────────────────────────────────────
-# session-sync 每次启动都会把「合不上主分支」的仓记进 state。那种提示混在启动
+# branch-sync 每次启动都会把「合不上主分支」的仓记进 state。那种提示混在启动
 # 信息里容易被划过去，所以在这里再报一次：收件箱是专门用来看「有什么等着我处理」的。
 # 当前仓的绝对路径 —— 用来把 blockedRepos 也收敛到同一个作用域
 REPO_TOP=""

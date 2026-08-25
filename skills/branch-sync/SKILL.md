@@ -1,17 +1,17 @@
 ---
-name: session-sync
-description: 'Sync the current git repo: fast-forward the local default branch from origin and merge it into the working branch, then explain what changed. Use when the user asks to 同步代码 / 更新代码 / 拉一下主分支 / 把 main 合进来 / 更新一下这个仓 / sync / pull latest, or mentions "/session-sync". Also use to interpret or act on a session-start sync report (状态 merge-conflict / stash-pop-conflict / main-diverged / fetch-failed), or to review what the automatic startup sync did. The same script also runs automatically at session start via a SessionStart hook.'
+name: branch-sync
+description: 'Sync the current git repo: fast-forward the local default branch from origin and merge it into the working branch, then explain what changed. Use when the user asks to 同步代码 / 更新代码 / 拉一下主分支 / 把 main 合进来 / 更新一下这个仓 / sync / pull latest, or mentions "/branch-sync". Also use to interpret or act on a session-start sync report (状态 merge-conflict / stash-pop-conflict / main-diverged / fetch-failed), or to review what the automatic startup sync did. The same script also runs automatically at session start via a SessionStart hook.'
 allowed-tools: Bash, Read, Edit
 ---
 
-# session-sync — 把当前仓库同步到最新
+# branch-sync — 把当前仓库同步到最新
 
 一句话：把远端主分支拉到本地，再合进你正在写的分支，然后用人话告诉你变了什么。
 会话启动时由 `SessionStart` 钩子自动跑一遍；这个技能是同一套脚本的手动入口，外加「出岔子了帮你收拾」。
 
-脚本：`~/.claude/skills/session-sync/scripts/sync.sh`
-配置：`~/.claude/session-init/config.json`
-报告：`~/.claude/session-init/reports/<仓名>.md`
+脚本：`~/.claude/skills/branch-sync/scripts/sync.sh`
+配置：`~/.claude/branch-sync/config.json`
+报告：`~/.claude/branch-sync/reports/<仓名>.md`
 
 ## 怎么用
 
@@ -22,7 +22,7 @@ allowed-tools: Bash, Read, Edit
 | 把工作区下所有仓都同步一遍 | `sync.sh --all`（**只有用户明确要求才跑**，逐个串行，仓多就慢） |
 | 只同步某个仓 | `sync.sh --force --repo <绝对路径>` |
 | 先看看会做什么 / 会不会动我的改动 | `sync.sh --dry-run --force`（只打印计划，不碰网络也不碰仓库） |
-| 改配置 / 关掉自动同步 / 改主分支 | 编辑 `~/.claude/session-init/config.json`（`sync.sh --config` 打印路径） |
+| 改配置 / 关掉自动同步 / 改主分支 | 编辑 `~/.claude/branch-sync/config.json`（`sync.sh --config` 打印路径） |
 
 脚本自己会打印「状态 / 摘要 / 完整报告」，你**不要**把报告原样贴给用户。要做的是：
 
@@ -38,7 +38,7 @@ allowed-tools: Bash, Read, Edit
 | --- | --- | --- |
 | `merge-conflict` | 主分支合进当前分支会冲突 | **脚本是靠只读预演发现的，一步都没动手**，工作区/HEAD/stash 全没碰过。报告里有冲突文件清单。先看冲突内容（`git merge <主分支>` 复现），分析两边改了什么，**给出方案后问用户要不要动手**，不要擅自解决冲突 |
 | `dirty-overlap` | 用户没提交的改动，正好落在这次要合进来的文件上 | 同样一步没动手。合得成，但恢复改动时会撞车。告诉用户：把手上的改动先提交或 stash 掉，再跑一次就能合 |
-| `stash-pop-conflict` | 合并成功但恢复未提交改动会冲突，已整体回滚 | 工作区和 HEAD 都回到同步前，什么都没丢。告诉用户：先把手头改动提交掉，再重跑 `/session-sync` |
+| `stash-pop-conflict` | 合并成功但恢复未提交改动会冲突，已整体回滚 | 工作区和 HEAD 都回到同步前，什么都没丢。告诉用户：先把手头改动提交掉，再重跑 `/branch-sync` |
 | `main-diverged` | 本地主分支和远端分歧，没法快进 | 大概率本地主分支上有不该有的提交。查 `git log origin/<主分支>..<主分支>`，告诉用户多出了什么，问要不要 reset |
 | `fetch-failed` | 拉不到远端 | 网络或权限问题，把 git 的报错原文给用户 |
 | `dirty-main-only` / `skipped-dirty` | 工作区脏，按配置只更新了主分支 | 告诉用户提交或 stash 后再同步 |

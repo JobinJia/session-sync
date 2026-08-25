@@ -3,14 +3,14 @@
 ## Shape
 
 ```
-skills/session-sync/scripts/sync.sh    ← 全部同步逻辑，钩子和技能共用同一份
+skills/branch-sync/scripts/sync.sh    ← 全部同步逻辑，钩子和技能共用同一份
 skills/repo-inbox/scripts/inbox.sh     ← 一次 GraphQL 查询 + jq 过滤
 skills/*/SKILL.md                      ← 给 Claude 看的：什么时候用、怎么汇报、出岔子怎么办
 hooks/hooks.json                       ← 插件形态的会话启动钩子
 install.sh                             ← 手动形态：软链 + 写钩子 + 生成配置
 ```
 
-运行时数据（`config.json` / `state/` / `reports/`）只存在于 `~/.claude/session-init/`，
+运行时数据（`config.json` / `state/` / `reports/`）只存在于 `~/.claude/branch-sync/`，
 永远不进这个仓库。
 
 ## 三个非改不可的约定
@@ -45,12 +45,12 @@ install.sh                             ← 手动形态：软链 + 写钩子 + �
 
 ## 怎么测
 
-`SESSION_INIT_DIR` 可以把配置/状态/报告整体挪到临时目录，测试全程不碰真实状态：
+`BRANCH_SYNC_DIR` 可以把配置/状态/报告整体挪到临时目录，测试全程不碰真实状态：
 
 ```bash
-export SESSION_INIT_DIR=/tmp/si-test
-mkdir -p "$SESSION_INIT_DIR"/{state,reports}
-cp config.example.json "$SESSION_INIT_DIR/config.json"
+export BRANCH_SYNC_DIR=/tmp/si-test
+mkdir -p "$BRANCH_SYNC_DIR"/{state,reports}
+cp config.example.json "$BRANCH_SYNC_DIR/config.json"
 ```
 
 边缘场景都能在本地造出来，不需要网络：
@@ -70,7 +70,7 @@ cp config.example.json "$SESSION_INIT_DIR/config.json"
 mkdir -p /tmp/shim
 printf '#!/bin/sh\necho "$@" >> "$GIT_TRACE_FILE"\nexec %s "$@"\n' "$(command -v git)" > /tmp/shim/git
 chmod +x /tmp/shim/git
-GIT_TRACE_FILE=/tmp/trace.log PATH="/tmp/shim:$PATH" ./skills/session-sync/scripts/sync.sh --force --repo /path/to/repo
+GIT_TRACE_FILE=/tmp/trace.log PATH="/tmp/shim:$PATH" ./skills/branch-sync/scripts/sync.sh --force --repo /path/to/repo
 grep -cE '(^| )(stash|merge|reset|checkout|rebase|commit)( |$)' /tmp/trace.log   # 冲突场景必须是 0
 ```
 

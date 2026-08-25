@@ -3,7 +3,7 @@
   "owner": { "name": "JobinJia" },
   "plugins": [
     {
-      "name": "session-sync",
+      "name": "branch-sync",
       "source": "./",
       "description": "Sync the current repo at session start and see who replied to your PRs, issues and discussions."
     }

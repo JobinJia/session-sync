@@ -1,4 +1,4 @@
-# session-sync
+# branch-sync
 
 Two Claude Code skills that take care of the two things you do at the start of every working
 session: get the repo you are in up to date, and find out whether anyone replied to what you
@@ -13,7 +13,7 @@ PR / issue / discussion 有没有人回。
 
 ## What it does / 它做什么
 
-**`session-sync`** — runs automatically when a session starts (and on demand). It fast-forwards
+**`branch-sync`** — runs automatically when a session starts (and on demand). It fast-forwards
 your local default branch from `origin`, merges it into the branch you are working on, and
 explains in plain language what changed. When it cannot merge cleanly it says so and changes
 nothing.
@@ -22,7 +22,7 @@ nothing.
 **you** opened, pulls the actual comment text down, and flags failing CI and anything still open
 that nobody has touched.
 
-**`session-sync`** —— 会话启动时自动跑（也可以手动触发）。把本地主分支从 `origin` 快进到最新，
+**`branch-sync`** —— 会话启动时自动跑（也可以手动触发）。把本地主分支从 `origin` 快进到最新，
 再合进你正在写的分支，然后用人话说清这次变了什么。合不干净的时候它会说出来，并且什么都不改。
 
 **`repo-inbox`** —— 手动触发。看**你自己**开的 PR / issue / discussion 有没有人回复、有没有人
@@ -84,8 +84,8 @@ not stay quiet.
 ### As a plugin / 作为插件
 
 ```
-/plugin marketplace add JobinJia/session-sync
-/plugin install session-sync@jobinjia
+/plugin marketplace add JobinJia/branch-sync
+/plugin install branch-sync@jobinjia
 ```
 
 The plugin ships the session-start hook with it, so nothing else is needed.
@@ -95,8 +95,8 @@ The plugin ships the session-start hook with it, so nothing else is needed.
 ### By hand / 手动
 
 ```bash
-git clone https://github.com/JobinJia/session-sync.git ~/myself/session-sync
-~/myself/session-sync/install.sh
+git clone https://github.com/JobinJia/branch-sync.git ~/myself/branch-sync
+~/myself/branch-sync/install.sh
 ```
 
 `install.sh` symlinks both skills into `~/.claude/skills/`, appends one `SessionStart` hook to
@@ -117,8 +117,8 @@ seeds a default config. It is idempotent; `install.sh --uninstall` reverses it.
 
 ## Configuration / 配置
 
-Everything lives in `~/.claude/session-init/config.json`; see `config.example.json`.
-配置只有一份，在 `~/.claude/session-init/config.json`，样例见 `config.example.json`。
+Everything lives in `~/.claude/branch-sync/config.json`; see `config.example.json`.
+配置只有一份，在 `~/.claude/branch-sync/config.json`，样例见 `config.example.json`。
 
 | Key | Default | What it does / 作用 |
 | --- | --- | --- |
@@ -133,19 +133,19 @@ Everything lives in `~/.claude/session-init/config.json`; see `config.example.js
 | `inbox.org` | — | Only used by `--org` and to complete `--repo <short-name>`. Derived from the current remote when empty. 只给 `--org` 和 `--repo <短名>` 补全用；留空就从当前仓的 remote 推。 |
 | `inbox.closedLookbackDays` | `30` | How far back to look **for closed/merged items**. Open ones are never filtered by age. 只作用于**已关闭/已合并**的；开着的东西不按时间筛。 |
 
-`SESSION_INIT_DIR` relocates config, state and reports as a set — used by the test suite so it
+`BRANCH_SYNC_DIR` relocates config, state and reports as a set — used by the test suite so it
 never touches your real state.
-`SESSION_INIT_DIR` 可以把配置、状态、报告整体挪走，测试就是靠它做隔离，不碰你真实的状态。
+`BRANCH_SYNC_DIR` 可以把配置、状态、报告整体挪走，测试就是靠它做隔离，不碰你真实的状态。
 
 ---
 
 ## Usage / 用法
 
 ```
-/session-sync              sync now and explain what changed   同步并说清变了什么
-/session-sync --dry-run    print the plan, touch nothing       只打印计划，什么都不碰
-/session-sync --report     re-read the last report             回看上次的报告
-/session-sync --all        sweep every repo in the workspace   扫工作区里所有仓
+/branch-sync              sync now and explain what changed   同步并说清变了什么
+/branch-sync --dry-run    print the plan, touch nothing       只打印计划，什么都不碰
+/branch-sync --report     re-read the last report             回看上次的报告
+/branch-sync --all        sweep every repo in the workspace   扫工作区里所有仓
 
 /repo-inbox                who replied, in this repo           谁回了我（当前仓）
 /repo-inbox --org          across the whole org                整个组织
@@ -164,8 +164,8 @@ different org than the rest is not silently missed.
 
 ## Status codes / 状态码
 
-`session-sync` reports one of these; the skill tells Claude what to do with each.
-`session-sync` 会报出其中一个，技能文档里写了每种该怎么处理。
+`branch-sync` reports one of these; the skill tells Claude what to do with each.
+`branch-sync` 会报出其中一个，技能文档里写了每种该怎么处理。
 
 | Code | Meaning / 含义 |
 | --- | --- |

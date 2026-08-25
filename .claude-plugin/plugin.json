@@ -1,11 +1,11 @@
 {
-  "name": "session-sync",
+  "name": "branch-sync",
   "description": "Keep the repo you are working in up to date at session start, and check whether anyone replied to the PRs, issues and discussions you opened. Never touches a dirty worktree without proving the merge is clean first.",
   "version": "1.0.0",
   "author": { "name": "JobinJia" },
-  "homepage": "https://github.com/JobinJia/session-sync",
-  "repository": "https://github.com/JobinJia/session-sync",
+  "homepage": "https://github.com/JobinJia/branch-sync",
+  "repository": "https://github.com/JobinJia/branch-sync",
   "license": "MIT",
   "keywords": ["git", "merge", "session-start", "github", "pull-requests", "code-review", "claude-code"],
-  "skills": ["./skills/session-sync", "./skills/repo-inbox"]
+  "skills": ["./skills/branch-sync", "./skills/repo-inbox"]
 }

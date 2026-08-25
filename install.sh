@@ -2,7 +2,7 @@
 # 手动安装（不走插件市场的那条路）：
 #   1. 把两个技能软链进 ~/.claude/skills/
 #   2. 在 ~/.claude/settings.json 的 SessionStart 里追加一条钩子（保留已有的，不覆盖）
-#   3. 首次生成 ~/.claude/session-init/config.json
+#   3. 首次生成 ~/.claude/branch-sync/config.json
 # 全程幂等，重复跑不会重复添加。--uninstall 可原样撤掉。
 set -uo pipefail
 
@@ -10,8 +10,8 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SKILLS_DIR="$CLAUDE_DIR/skills"
 SETTINGS="$CLAUDE_DIR/settings.json"
-DATA_DIR="$CLAUDE_DIR/session-init"
-HOOK_CMD="$REPO/skills/session-sync/scripts/sync.sh --hook"
+DATA_DIR="$CLAUDE_DIR/branch-sync"
+HOOK_CMD="$REPO/skills/branch-sync/scripts/sync.sh --hook"
 UNINSTALL=0
 [ "${1:-}" = "--uninstall" ] && UNINSTALL=1
 
@@ -20,7 +20,7 @@ need jq; need git
 
 # ── 卸载 ───────────────────────────────────────────────────────────
 if [ "$UNINSTALL" = "1" ]; then
-  for s in session-sync repo-inbox; do
+  for s in branch-sync repo-inbox; do
     if [ -L "$SKILLS_DIR/$s" ]; then rm -f "$SKILLS_DIR/$s"; echo "已移除软链 $SKILLS_DIR/$s"; fi
   done
   if [ -f "$SETTINGS" ]; then
@@ -35,7 +35,7 @@ fi
 
 # ── 1. 软链技能 ────────────────────────────────────────────────────
 mkdir -p "$SKILLS_DIR"
-for s in session-sync repo-inbox; do
+for s in branch-sync repo-inbox; do
   target="$REPO/skills/$s"
   link="$SKILLS_DIR/$s"
   if [ -L "$link" ] && [ "$(readlink "$link")" = "$target" ]; then
@@ -79,6 +79,6 @@ fi
 
 echo
 echo "装好了。新开一个会话，钩子就会在启动时同步你当前所在的仓库。"
-echo "手动触发：/session-sync   看谁回了你：/repo-inbox"
+echo "手动触发：/branch-sync   看谁回了你：/repo-inbox"
 command -v gh >/dev/null 2>&1 || echo "提醒：/repo-inbox 需要 gh CLI 并且登录过（gh auth login）"
 exit 0

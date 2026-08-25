@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# session-sync: keep the current repo's main branch fresh and merged into the
+# branch-sync: keep the current repo's main branch fresh and merged into the
 # working branch. Safe by design: every risky path rolls back to the exact
-# state it started from. Shared by the SessionStart hook and the /session-sync skill.
+# state it started from. Shared by the SessionStart hook and the /branch-sync skill.
 set -uo pipefail
 
-# SESSION_INIT_DIR 可以把配置/状态/报告整体挪走 —— 测试时用它做隔离，
+# BRANCH_SYNC_DIR 可以把配置/状态/报告整体挪走 —— 测试时用它做隔离，
 # 免得把真实配置和状态搅进来。日常不用设。
-CONFIG_DIR="${SESSION_INIT_DIR:-$HOME/.claude/session-init}"
+CONFIG_DIR="${BRANCH_SYNC_DIR:-$HOME/.claude/branch-sync}"
+# 这个工具早先叫 session-sync、数据目录叫 session-init。老目录还在而新目录还没建，
+# 就整体搬过去 —— 不然升级一次等于把"卡了几天""已读到哪"这些累积状态全丢了。
+if [ ! -d "$CONFIG_DIR" ] && [ -d "$HOME/.claude/session-init" ] && [ -z "${BRANCH_SYNC_DIR:-}" ]; then
+  mv "$HOME/.claude/session-init" "$CONFIG_DIR" 2>/dev/null
+fi
 CONFIG_FILE="$CONFIG_DIR/config.json"
 STATE_DIR="$CONFIG_DIR/state"
 REPORT_DIR="$CONFIG_DIR/reports"
@@ -69,6 +74,12 @@ jq -e . "$CONFIG_FILE" >/dev/null 2>&1 || { [ "$MODE" = "cli" ] && echo "config.
 
 cfg() { jq -r "$1 // empty" "$CONFIG_FILE" 2>/dev/null; }
 cfg_bool() { local v; v=$(jq -r "$1" "$CONFIG_FILE" 2>/dev/null); [ "$v" = "false" ] && echo 0 || echo 1; }
+# 配置里的数字一律走这里。直接把配置值丢进 $(( )) 的话，写成 "abc" 会被 bash
+# 当变量名，set -u 下整个脚本以 unbound variable 死掉 —— 一个笔误废掉整个工具。
+cfg_num() { # $1 = jq 路径, $2 = 兜底值
+  local v; v=$(jq -r "$1 // empty" "$CONFIG_FILE" 2>/dev/null)
+  case "$v" in ''|*[!0-9]*) echo "$2" ;; *) echo "$v" ;; esac
+}
 
 [ "$(cfg_bool '.enabled')" = "1" ] || exit 0
 
@@ -88,8 +99,8 @@ fi
 
 DIRTY_MODE=$(cfg '.dirtyWorktree'); [ -n "$DIRTY_MODE" ] || DIRTY_MODE="stash"
 MERGE_STRATEGY=$(cfg '.mergeStrategy'); [ -n "$MERGE_STRATEGY" ] || MERGE_STRATEGY="merge"
-FRESH_MIN=$(cfg '.onSessionStart.freshnessMinutes'); [ -n "$FRESH_MIN" ] || FRESH_MIN=15
-ESCALATE_DAYS=$(cfg '.blockedEscalateDays'); [ -n "$ESCALATE_DAYS" ] || ESCALATE_DAYS=7
+FRESH_MIN=$(cfg_num '.onSessionStart.freshnessMinutes' 15)
+ESCALATE_DAYS=$(cfg_num '.blockedEscalateDays' 7)
 R_ESCALATED=0
 
 # ---------- helpers ----------
@@ -149,13 +160,53 @@ stuck_days() { # $1 = epoch；返回卡了几天
 
 # 未提交改动的文件 ∩ 这次要合进来的改动的文件。
 # 有交集就说明 stash 之后再恢复会撞上，属于「合得成但恢复不回来」那一类。
+# 必须用 -z：不带 -z 的时候，git 会把含空格或非 ASCII 的路径加引号并做八进制转义
+# （`"src/\345\270\246..."`），拿去和 diff 的输出比对永远对不上，撞车就检测不出来，
+# 于是「先算后斩」的承诺在这类文件名上直接失效。-z 输出的是原始字节，没有转义。
 overlap_files() { # $1=top $2=mb
   local dirty incoming
-  dirty=$(git -C "$1" status --porcelain 2>/dev/null | sed 's/^...//' | sed 's/^.* -> //' | tr -d '"' | sort -u)
+  dirty=$(git -C "$1" status --porcelain -z 2>/dev/null | tr '\0' '\n' | sed 's/^...//' | grep -v '^$' | sort -u)
   [ -n "$dirty" ] || return 0
-  incoming=$(git -C "$1" diff --name-only "HEAD..$2" 2>/dev/null | sort -u)
+  incoming=$(git -C "$1" diff --name-only -z "HEAD..$2" 2>/dev/null | tr '\0' '\n' | grep -v '^$' | sort -u)
   [ -n "$incoming" ] || return 0
   comm -12 <(printf '%s\n' "$dirty") <(printf '%s\n' "$incoming") 2>/dev/null | grep -v '^$' | head -20
+}
+
+# ---------- 并发锁 ----------
+# 同一个仓可能被两个同时启动的会话各跑一遍：一个在 stash，另一个在 merge，
+# 中间还夹着回滚，谁也说不准最后剩下什么。`mkdir` 在 POSIX 上是原子的，拿它当锁。
+LOCK_PATH=""
+LOCK_STALE_SECONDS=600
+
+release_lock() {
+  [ -n "${LOCK_PATH:-}" ] && [ -d "$LOCK_PATH" ] && rm -rf "$LOCK_PATH"
+  LOCK_PATH=""
+  return 0
+}
+# 脚本被打断（超时、Ctrl-C）也要把锁还回去，否则这个仓会被自己锁死到过期
+trap 'release_lock' EXIT INT TERM
+
+acquire_lock() { # $1 = 锁路径
+  local lock="$1" age now mtime
+  if mkdir "$lock" 2>/dev/null; then
+    echo $$ > "$lock/pid" 2>/dev/null
+    LOCK_PATH="$lock"
+    return 0
+  fi
+  # 没抢到：可能是别人正在跑，也可能是上次被 kill -9 留下的死锁
+  now=$(date +%s)
+  mtime=$(stat -f %m "$lock" 2>/dev/null || stat -c %Y "$lock" 2>/dev/null || echo "$now")
+  case "$mtime" in ''|*[!0-9]*) mtime="$now" ;; esac
+  age=$(( now - mtime ))
+  if [ "$age" -gt "$LOCK_STALE_SECONDS" ]; then
+    rm -rf "$lock" 2>/dev/null
+    if mkdir "$lock" 2>/dev/null; then
+      echo $$ > "$lock/pid" 2>/dev/null
+      LOCK_PATH="$lock"
+      return 0
+    fi
+  fi
+  return 1
 }
 
 # ---------- core ----------
@@ -184,6 +235,14 @@ sync_repo() {
 
   if [ "$REPORT_ONLY" = "1" ]; then
     R_STATUS="report-only"; return
+  fi
+
+  # 只读路径（--report / --dry-run）不需要锁，会动手的才要
+  if [ "$DRY" != "1" ]; then
+    acquire_lock "$STATE_DIR/$key.lock" || {
+      # 另一个会话正在同步这个仓，让它跑完就行，这边安静退出
+      R_STATUS="skipped-locked"; return
+    }
   fi
 
   # freshness
@@ -218,7 +277,7 @@ sync_repo() {
     R_STATUS="dry-run"
     plan="fetch origin → 快进本地 $mb"
     if [ "$cur" != "$mb" ]; then
-      if matches_cfg_glob "$cur" '"'"'.protectedBranches[]? // empty'"'"'; then
+      if matches_cfg_glob "$cur" '.protectedBranches[]? // empty'; then
         plan="$plan → $cur 在保护分支名单里，不合并"
       elif [ "$dirty_now" != "0" ] && [ "$DIRTY_MODE" = "stash" ]; then
         plan="$plan → stash $dirty_now 项改动 → merge $mb 进 $cur → 恢复改动"
@@ -246,7 +305,15 @@ sync_repo() {
   local main_updated=0
   if [ "$(cfg_bool '.tasks.updateMain')" = "1" ]; then
     if [ "$cur" = "$mb" ]; then
-      git -C "$top" merge --ff-only "origin/$mb" >/dev/null 2>&1 || { R_STATUS="main-diverged"; }
+      git -C "$top" merge --ff-only "origin/$mb" >/dev/null 2>&1 || {
+        # 快进失败有两种原因，说成同一种就是误诊：真分歧（本地有远端没有的提交），
+        # 还是工作区脏、git 不肯覆盖你没提交的改动。后者去查"分歧"只会白费功夫。
+        if git -C "$top" merge-base --is-ancestor "$mb" "origin/$mb" 2>/dev/null; then
+          R_STATUS="dirty-blocks-ff"
+        else
+          R_STATUS="main-diverged"
+        fi
+      }
     else
       git -C "$top" fetch origin "$mb:$mb" >/dev/null 2>&1 || { R_STATUS="main-diverged"; }
     fi
@@ -255,8 +322,18 @@ sync_repo() {
   else
     main_after="$main_before"
   fi
-  if [ "${R_STATUS:-}" = "main-diverged" ]; then
-    R_SUMMARY="本地 $mb 与远端分歧，无法快进，已停手"
+  if [ "${R_STATUS:-}" = "main-diverged" ] || [ "${R_STATUS:-}" = "dirty-blocks-ff" ]; then
+    if [ "${R_STATUS}" = "dirty-blocks-ff" ]; then
+      R_SUMMARY="你正停在 ${mb} 上且有未提交改动，git 不肯覆盖它们，所以 ${mb} 没能快进（不是分歧）"
+    else
+      R_SUMMARY="本地 ${mb} 有远端没有的提交，无法快进，已停手"
+    fi
+    # 修 7：这条路径没有评估过合并，别把上一次记下的阻塞信息抹掉
+    R_BLOCKED_KIND=$(jq -r '.blocked_kind // ""' "$statef" 2>/dev/null)
+    R_BLOCKED_HEAD=$(jq -r '.blocked_head // ""' "$statef" 2>/dev/null)
+    R_BLOCKED_MAIN=$(jq -r '.blocked_main // ""' "$statef" 2>/dev/null)
+    R_BLOCKED_SINCE=$(jq -r '.blocked_since // 0' "$statef" 2>/dev/null)
+    R_CONFLICTS=$(jq -r '.blocked_files // ""' "$statef" 2>/dev/null)
     write_state "$statef" "$top" "$mb" "$cur" "" ""
     return
   fi
@@ -332,7 +409,7 @@ sync_repo() {
               skip_merge=1
             fi
             if [ "$skip_merge" = "0" ]; then
-            local msg="session-init-auto-$(date +%Y%m%d-%H%M%S)"
+            local msg="branch-sync-auto-$(date +%Y%m%d-%H%M%S)"
             if git -C "$top" stash push -u -m "$msg" >/dev/null 2>&1; then
               stash_ref=$(git -C "$top" stash list --format='%gd %gs' 2>/dev/null | grep -F "$msg" | head -1 | awk '{print $1}')
               [ -n "$stash_ref" ] && stash_sha=$(git -C "$top" rev-parse "$stash_ref" 2>/dev/null)
@@ -378,11 +455,15 @@ sync_repo() {
               R_CONFLICTS=$(git -C "$top" diff --name-only --diff-filter=U 2>/dev/null | head -20)
               git -C "$top" reset --merge >/dev/null 2>&1
               git -C "$top" reset --hard "$pre_sha" >/dev/null 2>&1
-              git -C "$top" stash pop "$ref2" >/dev/null 2>&1
               post_sha="$pre_sha"; merged=0
               R_STATUS="stash-pop-conflict"
               R_BLOCKED_KIND="stash-pop-conflict"
-              note="合并后恢复改动会冲突，已整体回滚到同步前（stash sha: ${stash_sha}）"
+              if git -C "$top" stash pop "$ref2" >/dev/null 2>&1; then
+                note="合并后恢复改动会冲突，已整体回滚到同步前，改动已放回工作区"
+              else
+                # 别写"已恢复"——它没恢复。说清东西在哪、怎么拿回来。
+                note="合并后恢复改动会冲突；合并已撤销，但你的改动还留在 stash 里没能放回工作区，用 git stash apply ${stash_sha} 取回"
+              fi
             fi
           fi
         else
@@ -393,8 +474,11 @@ sync_repo() {
             local ref2
             ref2=$(git -C "$top" stash list --format='%gd %H' 2>/dev/null | grep -F "$stash_sha" | head -1 | awk '{print $1}')
             [ -n "$ref2" ] || ref2="$stash_ref"
-            git -C "$top" stash pop "$ref2" >/dev/null 2>&1
-            note="${note}，未提交改动已恢复（stash sha: ${stash_sha}）"
+            if git -C "$top" stash pop "$ref2" >/dev/null 2>&1; then
+              note="${note}，未提交改动已恢复"
+            else
+              note="${note}；但你的改动没能放回工作区，还在 stash 里，用 git stash apply ${stash_sha} 取回"
+            fi
           fi
         fi
       fi
@@ -534,9 +618,9 @@ write_report() { # reportf top name mb cur main_before main_after pre post merge
       fi
       echo
       if [ "${R_STATUS:-}" = "dirty-overlap" ]; then
-        echo "处理办法：把手上的改动先提交或 stash 掉，再跑 /session-sync 就能合了。"
+        echo "处理办法：把手上的改动先提交或 stash 掉，再跑 /branch-sync 就能合了。"
       else
-        echo "处理办法：手动 git merge ${mb} 复现冲突后逐个解决，或者叫 /session-sync 让 Claude 接手。"
+        echo "处理办法：手动 git merge ${mb} 复现冲突后逐个解决，或者叫 /branch-sync 让 Claude 接手。"
       fi
     fi
   } > "$reportf" 2>/dev/null
@@ -545,6 +629,7 @@ write_report() { # reportf top name mb cur main_before main_after pre post merge
 # ---------- run ----------
 run_one_and_print() {
   sync_repo "$1"
+  release_lock
   case "$MODE" in
     hook) : ;;
     *)
@@ -579,6 +664,7 @@ if [ "$ALL" = "1" ]; then
 fi
 
 sync_repo "$TARGET"
+release_lock
 
 if [ "$MODE" = "hook" ]; then
   case "${R_STATUS:-}" in
@@ -590,11 +676,11 @@ if [ "$MODE" = "hook" ]; then
 不要一笔带过 —— 明确告诉用户卡了多久、卡在哪几个文件上，并直接问他要不要现在处理。
 冲突拖得越久越难解，这正是它该被当回事的原因。"
       fi
-      ctx="[session-sync] ${R_SUMMARY:-}
+      ctx="[branch-sync] ${R_SUMMARY:-}
 状态：${R_STATUS}  完整报告：${R_REPORT_PATH:-无}
 ${urgent}
 说明：这是会话启动时自动跑的仓库同步。请在你对用户的第一条回复开头，用两三句中文人话说清：主分支带来了什么变化、有没有合进当前分支、有没有出岔子需要处理。如果状态是 merge-conflict / dirty-overlap，说明脚本是靠只读预演发现问题的，**一步都没动手**，工作区原样；
-如果是 stash-pop-conflict / main-diverged / fetch-failed，说明工作区已整体回滚到同步前。两种都可以叫 /session-sync 让你接手。"
+如果是 stash-pop-conflict / main-diverged / fetch-failed，说明工作区已整体回滚到同步前。两种都可以叫 /branch-sync 让你接手。"
       jq -n --arg c "$ctx" '{hookSpecificOutput:{hookEventName:"SessionStart", additionalContext:$c}}'
       ;;
     *) : ;;   # no-change / not-a-repo / skipped-* : stay silent
