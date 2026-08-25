@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT:-${extensionPath:-.}}/skills/session-sync/scripts/sync.sh\" --hook",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

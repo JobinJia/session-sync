@@ -1,0 +1,7 @@
+# 运行时数据只存在于 ~/.claude/session-init/，不属于这个仓库
+config.json
+state/
+reports/
+
+# macOS
+.DS_Store

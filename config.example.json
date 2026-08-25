@@ -1,0 +1,36 @@
+{
+  "enabled": true,
+
+  "onSessionStart": {
+    "enabled": true,
+    "sources": ["startup", "resume"],
+    "freshnessMinutes": 15
+  },
+
+  "tasks": {
+    "updateMain": true,
+    "mergeIntoBranch": true,
+    "summarize": true
+  },
+
+  "blockedEscalateDays": 7,
+
+  "dirtyWorktree": "stash",
+  "mergeStrategy": "merge",
+
+  "protectedBranches": ["main", "master", "release/*"],
+  "skipBranches": [],
+
+  "workspaceRoot": "",
+
+  "repos": {
+    "some-repo": { "defaultBranch": "main" },
+    "another-repo": { "enabled": false }
+  },
+
+  "inbox": {
+    "org": "",
+    "includeCI": true,
+    "closedLookbackDays": 30
+  }
+}
